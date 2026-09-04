@@ -1,3 +1,4 @@
+mod mcp;
 mod model;
 mod params;
 mod search;

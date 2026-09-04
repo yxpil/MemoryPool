@@ -363,7 +363,11 @@ fn spawn_serve(dir: &Path, extra_args: &[&str]) -> ServeHandle {
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines() {
             let Ok(line) = line else { break };
-            if let Some(addr) = line.trim().strip_prefix("memorypool listening on http://") {
+            if let Some(addr) = line
+                .trim()
+                .strip_prefix("memorypool listening on http://")
+                .and_then(|rest| rest.split_whitespace().next())
+            {
                 let _ = tx.send(addr.to_string());
                 break;
             }

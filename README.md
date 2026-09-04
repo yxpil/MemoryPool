@@ -40,8 +40,9 @@ atomically (temp file + rename).
   importance weighting and exponential time decay (30-day half-life), ranked output.
 - **stdin contract**: when stdin is a pipe, a JSON object is read and its fields
   override CLI arguments (stdin wins) — exactly what BIT's exec runtime sends.
-- **HTTP server** (`serve`, default `127.0.0.1:8751`): REST endpoints plus a BIT
-  Remote-tool `/invoke` endpoint, optional `--token` Bearer auth.
+- **HTTP server** (`serve`, default `127.0.0.1:8751`): REST endpoints, a BIT
+  Remote-tool `/invoke` endpoint and MCP (Streamable HTTP, `/mcp`), optional
+  `--token` Bearer auth.
 - **Atomic, durable storage**: append + temp-file/rename on JSONL, malformed lines
   are skipped with a warning instead of breaking the pool.
 - **Single static binary**, no runtime dependencies (Rust, edition 2021).
@@ -54,10 +55,10 @@ put `memorypool` on your `PATH`:
 
 | Platform | Archive |
 |---|---|
-| Linux x64 | `memorypool-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS Apple Silicon | `memorypool-v0.1.0-aarch64-apple-darwin.tar.gz` |
-| macOS Intel | `memorypool-v0.1.0-x86_64-apple-darwin.tar.gz` |
-| Windows x64 | `memorypool-v0.1.0-x86_64-pc-windows-msvc.zip` |
+| Linux x64 | `memorypool-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `memorypool-v0.2.0-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `memorypool-v0.2.0-x86_64-apple-darwin.tar.gz` |
+| Windows x64 | `memorypool-v0.2.0-x86_64-pc-windows-msvc.zip` |
 
 **Build from source**:
 
@@ -166,10 +167,25 @@ curl -X POST http://127.0.0.1:8600/api/tools \
 
 BIT then POSTs `{"tool_id": "...", "tool": "memorypool", "invoked_by": "agent:...",
 "params": {...}}` to `/invoke`; MemoryPool routes on `params.action`
-(`add` / `search` / `list` / `delete` / `stats`) and answers with the
+(`add` / `search` / `list` / `get` / `delete` / `stats`) and answers with the
 corresponding JSON. Unknown actions get HTTP 400.
 
-### 3) Direct HTTP API
+### 3) MCP client (since 0.2.0)
+
+`memorypool serve` is also a full MCP server (Streamable HTTP JSON-RPC,
+compatible with BIT's built-in MCP client, same wire contract as
+SECFORGE/PANOPTES): `initialize` handshake + `Mcp-Session-Id`, `tools/list`,
+`tools/call` (failures return as `isError:true` results, not transport errors),
+`ping`, protocol versions `2024-11-05` / `2025-03-26` / `2025-06-18`. Six tools
+are exposed: `add`, `search`, `list`, `get`, `delete`, `stats`. A configured
+`--token` protects the MCP endpoints too.
+
+```bash
+# add the endpoint on BIT's MCP servers page
+http://127.0.0.1:8751/mcp
+```
+
+### 4) Direct HTTP API
 
 ```bash
 curl http://127.0.0.1:8751/health
@@ -197,7 +213,8 @@ With `--token <t>`, add `-H "Authorization: Bearer <t>"` to every call except
 | GET | `/mem/list?limit=&tag=` | memories, newest first |
 | GET | `/mem/{id}` | one memory (404 if missing) |
 | DELETE | `/mem/{id}` | `{"deleted":"<id>"}` (404 if missing) |
-| POST | `/invoke` | BIT Remote protocol: routes on `params.action` = `add`/`search`/`list`/`delete`/`stats`; unknown → 400 |
+| POST | `/invoke` | BIT Remote protocol: routes on `params.action` = `add`/`search`/`list`/`get`/`delete`/`stats`; unknown → 400 |
+| POST | `/` and `/mcp` | MCP JSON-RPC 2.0 (Streamable HTTP): `initialize`, `tools/list`, `tools/call`, `ping` — six tools (`add`/`search`/`list`/`get`/`delete`/`stats`), `isError` results for failures; covered by `--token` auth |
 
 CLI equivalents exist for everything (`memorypool --help`), and all CLI output is
 pure JSON whenever `--json` is passed or stdin carries the BIT exec-mode JSON.
@@ -211,7 +228,7 @@ pure JSON whenever `--json` is passed or stdin carries the BIT exec-mode JSON.
 MemoryPool 为 AI 智能体提供**跨进程、可持久化的共享记忆**。它是
 [BIT](https://github.com/yxpil/bit) 的独立卫星工具，不依赖 BIT 自带的
 `memories.json`，可作为多个智能体共享的中央记忆服务，通过 CLI、HTTP API 或
-BIT Remote 工具协议三种方式接入。
+BIT Remote 工具协议、MCP 客户端四种方式接入。
 
 记忆默认存储在 `~/.memorypool/memories.jsonl`（可用环境变量
 `MEMORYPOOL_DATA_DIR` 覆盖目录）。每条记忆包含：
@@ -235,7 +252,7 @@ BIT Remote 工具协议三种方式接入。
 - **stdin 契约**：stdin 为管道时读取 JSON 对象，字段优先于命令行参数
   （stdin 优先）——正是 BIT exec 运行时的调用方式。
 - **HTTP 服务**（`serve`，默认 `127.0.0.1:8751`）：REST 端点 + BIT Remote 工具
-  `/invoke` 端点，可选 `--token` Bearer 鉴权。
+  `/invoke` 端点 + MCP（Streamable HTTP，`/mcp`），可选 `--token` Bearer 鉴权。
 - **原子可靠存储**：JSONL 追加写 + 临时文件/rename 原子落盘；损坏行跳过并警告，
   不影响整个记忆池。
 - **单一静态二进制**，无运行时依赖（Rust, edition 2021）。
@@ -247,10 +264,10 @@ BIT Remote 工具协议三种方式接入。
 
 | 平台 | 文件 |
 |---|---|
-| Linux x64 | `memorypool-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS Apple Silicon | `memorypool-v0.1.0-aarch64-apple-darwin.tar.gz` |
-| macOS Intel | `memorypool-v0.1.0-x86_64-apple-darwin.tar.gz` |
-| Windows x64 | `memorypool-v0.1.0-x86_64-pc-windows-msvc.zip` |
+| Linux x64 | `memorypool-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `memorypool-v0.2.0-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `memorypool-v0.2.0-x86_64-apple-darwin.tar.gz` |
+| Windows x64 | `memorypool-v0.2.0-x86_64-pc-windows-msvc.zip` |
 
 **源码构建**：
 
@@ -282,7 +299,7 @@ memorypool serve --host 127.0.0.1 --port 8751 --token s3cret   # 带鉴权
 
 ## BIT 集成
 
-MemoryPool 以 [BIT](https://github.com/yxpil/bit) 支持的全部三种方式接入，
+MemoryPool 以 [BIT](https://github.com/yxpil/bit) 支持的全部四种方式接入，
 可任选组合使用。
 
 ### 1) CLI：通过 BIT「exec 运行时」
@@ -359,10 +376,24 @@ curl -X POST http://127.0.0.1:8600/api/tools \
 
 之后 BIT 会向 `/invoke` POST
 `{"tool_id": "...", "tool": "memorypool", "invoked_by": "agent:...", "params": {...}}`；
-MemoryPool 按 `params.action` 路由（`add` / `search` / `list` / `delete` /
-`stats`），响应对应 JSON，未知 action 返回 HTTP 400。
+MemoryPool 按 `params.action` 路由（`add` / `search` / `list` / `get` /
+`delete` / `stats`），响应对应 JSON，未知 action 返回 HTTP 400。
 
-### 3) 直接调用 HTTP API
+### 3) MCP 客户端（0.2.0 新增）
+
+`memorypool serve` 同时是一个完整的 MCP 服务器（Streamable HTTP JSON-RPC，
+与 BIT 内置 MCP 客户端兼容，协议契约与 SECFORGE/PANOPTES 一致）：
+`initialize` 握手 + `Mcp-Session-Id`、`tools/list`、`tools/call`（失败以
+`isError:true` 结果返回，而非传输层错误）、`ping`，支持 `2024-11-05` /
+`2025-03-26` / `2025-06-18` 三个协议版本。暴露 6 个工具：`add`、`search`、
+`list`、`get`、`delete`、`stats`。配置了 `--token` 时 MCP 端点同样受保护。
+
+```bash
+# 在 BIT → MCP 服务器 页面添加该端点
+http://127.0.0.1:8751/mcp
+```
+
+### 4) 直接调用 HTTP API
 
 ```bash
 curl http://127.0.0.1:8751/health
@@ -390,7 +421,8 @@ curl -X POST http://127.0.0.1:8751/invoke -H "Content-Type: application/json" \
 | GET | `/mem/list?limit=&tag=` | 按时间倒序列出记忆 |
 | GET | `/mem/{id}` | 查询单条（不存在返回 404） |
 | DELETE | `/mem/{id}` | `{"deleted":"<id>"}`（不存在返回 404） |
-| POST | `/invoke` | BIT Remote 协议：按 `params.action` 路由 `add`/`search`/`list`/`delete`/`stats`；未知 action 返回 400 |
+| POST | `/invoke` | BIT Remote 协议：按 `params.action` 路由 `add`/`search`/`list`/`get`/`delete`/`stats`；未知 action 返回 400 |
+| POST | `/` 与 `/mcp` | MCP JSON-RPC 2.0（Streamable HTTP）：`initialize`、`tools/list`、`tools/call`、`ping`，6 个工具；失败以 `isError` 返回；`--token` 鉴权同样覆盖 |
 
 所有 HTTP 端点都有等价的 CLI 子命令（`memorypool --help`），且只要传入
 `--json`（或 stdin 携带 BIT exec 模式 JSON）即输出纯 JSON。

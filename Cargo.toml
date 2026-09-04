@@ -1,6 +1,6 @@
 [package]
 name = "memorypool"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Shared, persistent memory pool for AI agents around the BIT ecosystem"
 license = "Apache-2.0"

@@ -34,6 +34,7 @@ pub async fn run(host: String, port: u16, token: Option<String>) -> Result<()> {
         .route("/mem/list", get(list_mem))
         .route("/mem/{id}", get(get_mem).delete(delete_mem))
         .route("/invoke", post(invoke))
+        .merge(crate::mcp::routes())
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind((host.as_str(), port))
@@ -43,7 +44,7 @@ pub async fn run(host: String, port: u16, token: Option<String>) -> Result<()> {
         .local_addr()
         .context("failed to read bound address")?;
     // Machine-readable startup line (stderr); integration tests parse the port.
-    eprintln!("memorypool listening on http://{addr}");
+    eprintln!("memorypool listening on http://{addr} (POST /invoke, POST /mcp MCP)");
     axum::serve(listener, app).await.context("server error")?;
     Ok(())
 }
@@ -171,50 +172,75 @@ async fn invoke(State(state): State<AppState>, body: Bytes) -> Response {
     let action = get_string(&params, &["action"])
         .or_else(|| get_string(obj, &["tool"]))
         .unwrap_or_default();
-    match action.as_str() {
-        "add" => match memory_from_params(&params) {
-            Ok(memory) => match state.store.add(memory) {
-                Ok(m) => Json(m).into_response(),
-                Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-            },
-            Err(msg) => error(StatusCode::BAD_REQUEST, &msg),
-        },
+    match dispatch_action(&state, &action, &params) {
+        Ok(value) => Json(value).into_response(),
+        Err(ActionError::Bad(message)) => error(StatusCode::BAD_REQUEST, &message),
+        Err(ActionError::NotFound(message)) => error(StatusCode::NOT_FOUND, &message),
+        Err(ActionError::Internal(message)) => error(StatusCode::INTERNAL_SERVER_ERROR, &message),
+    }
+}
+
+/// Why an action call failed. `Bad` maps to HTTP 400, `NotFound` to 404,
+/// `Internal` to 500; the MCP surface flattens all into `isError` results.
+pub enum ActionError {
+    Bad(String),
+    NotFound(String),
+    Internal(String),
+}
+
+/// Shared action routing used by `POST /invoke` and the MCP `tools/call`.
+/// `params` are the action's arguments (the action name itself is stripped by
+/// the caller); unknown extra keys are ignored.
+pub fn dispatch_action(
+    state: &AppState,
+    action: &str,
+    params: &serde_json::Map<String, Value>,
+) -> std::result::Result<Value, ActionError> {
+    let bad = |m: &str| ActionError::Bad(m.to_string());
+    let internal = |e: anyhow::Error| ActionError::Internal(format!("{e:#}"));
+    match action {
+        "add" => {
+            let memory = memory_from_params(params).map_err(ActionError::Bad)?;
+            state.store.add(memory).map_err(internal).and_then(|m| {
+                serde_json::to_value(m).map_err(|e| ActionError::Internal(e.to_string()))
+            })
+        }
         "search" => {
-            let query = get_string(&params, &["query", "q"]).unwrap_or_default();
-            let tag = get_string(&params, &["tag"]);
-            let limit = get_usize(&params, &["limit"]).unwrap_or(10);
+            let query = get_string(params, &["query", "q"]).unwrap_or_default();
+            let tag = get_string(params, &["tag"]);
+            let limit = get_usize(params, &["limit"]).unwrap_or(10);
             let results = search::search(&state.store.list(None), &query, tag.as_deref(), limit);
-            Json(results_json(&results)).into_response()
+            Ok(results_json(&results))
         }
         "list" => {
-            let tag = get_string(&params, &["tag"]);
-            let limit = get_usize(&params, &["limit"]);
+            let tag = get_string(params, &["tag"]);
+            let limit = get_usize(params, &["limit"]);
             let mut items = state.store.list(tag.as_deref());
             if let Some(limit) = limit {
                 items.truncate(limit);
             }
-            Json(Value::Array(
+            Ok(Value::Array(
                 items
                     .into_iter()
                     .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
                     .collect(),
             ))
-            .into_response()
         }
+        "get" => state
+            .store
+            .get(&get_string(params, &["id"]).ok_or_else(|| bad("missing id"))?)
+            .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+            .ok_or_else(|| ActionError::NotFound("memory not found".into())),
         "delete" => {
-            let Some(id) = get_string(&params, &["id"]) else {
-                return error(StatusCode::BAD_REQUEST, "missing id");
-            };
+            let id = get_string(params, &["id"]).ok_or_else(|| bad("missing id"))?;
             match state.store.delete(&id) {
-                Ok(true) => Json(json!({"deleted": id})).into_response(),
-                Ok(false) => error(StatusCode::NOT_FOUND, "memory not found"),
-                Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+                Ok(true) => Ok(json!({"deleted": id})),
+                Ok(false) => Err(ActionError::NotFound("memory not found".into())),
+                Err(e) => Err(internal(e)),
             }
         }
-        "stats" => {
-            Json(serde_json::to_value(state.store.stats()).unwrap_or(Value::Null)).into_response()
-        }
-        other => error(StatusCode::BAD_REQUEST, &format!("unknown action: {other}")),
+        "stats" => Ok(serde_json::to_value(state.store.stats()).unwrap_or(Value::Null)),
+        other => Err(bad(&format!("unknown action: {other}"))),
     }
 }
 
