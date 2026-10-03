@@ -1,3 +1,11 @@
+# MemoryPool 测试说明
+- 测试完成：是（2026-10-04）
+- 测试日期：2026-10-04
+- 测试内容：单元覆盖 model(serde 默认值/importance 钳制)、store(JSONL 追加·原子重写·坏行跳过)、search(时间衰减·打分)、params(宽松强转)、mcp(注册表)；集成以黑盒方式起真实二进制覆盖 cli/REST/MCP；注入测试覆盖 HTTP 层（敌对文本经 POST/GET 原样 JSON 往返、畸形/非对象 body 400、URL 编码路径穿越 id 404 且不读文件、正则/通配符查询按字面子串处理、SQL 式 token 猜测 401）。无运行时钩子/插件/事件机制。
+- 运行命令：`cargo test`（仓库根）
+- 测试框架：Rust `#[cfg(test)]` + `cargo test`（无 lib target，集成测试位于 `tests/`，黑盒驱动二进制）
+- 模型：豆包（Doubao）生成
+
 # Testing MemoryPool
 
 MemoryPool is a persistent memory pool (JSONL on disk + relevance-scored search)
