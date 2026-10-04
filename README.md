@@ -438,3 +438,15 @@ curl -X POST http://127.0.0.1:8751/invoke -H "Content-Type: application/json" \
 ---
 
 Part of the [BIT](https://github.com/yxpil/bit) ecosystem · License: [Apache-2.0](LICENSE)
+
+---
+
+<div align="center">
+
+<a href="https://github.com/yxpil/MemoryPool">
+  <img width="100%" src="https://alittlecatgirlpanel.yxp.hk/card?repo=yxpil/MemoryPool" alt="gh-card · yxpil/MemoryPool" />
+</a>
+
+<sub>Powered by <a href="https://alittlecatgirlpanel.yxp.hk"><b>gh-card</b></a> · 粉色手写体 README 仓库名片</sub>
+
+</div>
